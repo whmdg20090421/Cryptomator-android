@@ -1,0 +1,1 @@
+include ':generator', ':presentation', ':generator-api', ':domain', ':data', ':util'

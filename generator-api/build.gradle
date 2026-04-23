@@ -1,0 +1,14 @@
+apply plugin: 'java'
+
+//noinspection GroovyUnusedAssignment
+sourceCompatibility = 17
+//noinspection GroovyUnusedAssignment
+targetCompatibility = 17
+
+dependencies {
+	def dependencies = rootProject.ext.dependencies
+
+	implementation(dependencies.android) {
+		exclude module: 'httpclient'
+	}
+}

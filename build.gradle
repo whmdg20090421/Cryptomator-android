@@ -1,0 +1,71 @@
+apply from: 'buildsystem/dependencies.gradle'
+
+buildscript {
+	ext.kotlin_version = '2.2.10'
+	repositories {
+		mavenCentral()
+		google()
+	}
+	dependencies {
+		// before upgrading AGP, check https://gitlab.com/fdroid/admin/-/issues/593
+		classpath 'com.android.tools.build:gradle:8.11.1'
+		classpath 'org.greenrobot:greendao-gradle-plugin:3.3.1'
+		classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+		classpath "de.mannodermaus.gradle.plugins:android-junit5:1.7.1.1"
+	}
+}
+
+def getVersionCode = { ->
+	try {
+		def branchName = new ByteArrayOutputStream()
+		exec {
+			commandLine 'git', 'rev-parse', '--abbrev-ref', 'HEAD'
+			standardOutput = branchName
+		}
+		def appBuild = new ByteArrayOutputStream()
+		exec {
+			commandLine 'git', 'rev-list', '--count', branchName.toString().trim()
+			standardOutput = appBuild
+		}
+		return Integer.parseInt(appBuild.toString().trim()) + 1958 // adding 1958 for legacy reasons
+	}
+	catch (ignored) {
+		return -1
+	}
+}
+
+allprojects {
+	ext {
+		androidApplicationId = 'org.cryptomator'
+		androidVersionCode = getVersionCode() // must be getVersionCode(). only at release tag set the actual value
+		androidVersionName = '1.13.0-SNAPSHOT'
+	}
+	repositories {
+		mavenCentral()
+		maven {
+			url "https://maven.google.com"
+		}
+		google()
+	}
+}
+
+task clean(type: Delete) {
+	delete rootProject.buildDir
+}
+
+def getApiKey(key) {
+	return !liteFlavor() ? System.getenv().getOrDefault(key, getApiKeyLocal(key)) : ""
+}
+
+def liteFlavor() {
+	gradle.startParameter.taskNames.stream().filter(t -> t.toLowerCase().contains("lite")).findAny().isPresent()
+}
+
+def getApiKeyLocal(key) {
+	if (!rootProject.file("local.properties").exists()) {
+		return ""
+	}
+	def localPropertyList = new Properties()
+	localPropertyList.load(new FileInputStream(rootProject.file("local.properties")))
+	return localPropertyList.getOrDefault(key, "")
+}

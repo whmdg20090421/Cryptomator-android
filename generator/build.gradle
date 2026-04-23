@@ -1,0 +1,23 @@
+apply plugin: 'java'
+
+//noinspection GroovyUnusedAssignment
+sourceCompatibility = 17
+//noinspection GroovyUnusedAssignment
+targetCompatibility = 17
+
+repositories {
+	mavenCentral()
+}
+
+dependencies {
+	def dependencies = rootProject.ext.dependencies
+
+	implementation project(':generator-api')
+
+	implementation dependencies.velocity
+	implementation dependencies.javaxAnnotation
+}
+
+configurations {
+	all*.exclude group: 'com.google.android', module: 'android'
+}
