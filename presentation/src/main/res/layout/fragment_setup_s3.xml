@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+	android:layout_width="match_parent"
+	android:layout_height="match_parent">
+
+	<LinearLayout
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:orientation="vertical"
+		android:padding="@dimen/activity_vertical_margin">
+
+		<com.google.android.material.textfield.TextInputLayout
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content">
+
+			<com.google.android.material.textfield.TextInputEditText
+				android:id="@+id/display_name_edit_text"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:hint="@string/screen_s3_settings_display_name_label"
+				android:imeOptions="flagNoPersonalizedLearning"
+				android:maxLines="1"
+				android:singleLine="true" />
+
+		</com.google.android.material.textfield.TextInputLayout>
+
+		<com.google.android.material.textfield.TextInputLayout
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content">
+
+
+		</com.google.android.material.textfield.TextInputLayout>
+
+		<com.google.android.material.textfield.TextInputLayout
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content">
+
+			<com.google.android.material.textfield.TextInputEditText
+				android:id="@+id/access_key_edit_text"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:hint="@string/screen_s3_settings_access_key_label"
+				android:imeOptions="flagNoPersonalizedLearning"
+				android:inputType="textPassword"
+				android:maxLines="1"
+				android:singleLine="true" />
+
+		</com.google.android.material.textfield.TextInputLayout>
+
+		<com.google.android.material.textfield.TextInputLayout
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content">
+
+			<com.google.android.material.textfield.TextInputEditText
+				android:id="@+id/secret_key_edit_text"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:hint="@string/screen_s3_settings_secret_key_label"
+				android:imeOptions="flagNoPersonalizedLearning"
+				android:inputType="textPassword"
+				android:maxLines="1"
+				android:singleLine="true" />
+
+		</com.google.android.material.textfield.TextInputLayout>
+
+		<com.google.android.material.textfield.TextInputLayout
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content">
+
+			<com.google.android.material.textfield.TextInputEditText
+				android:id="@+id/bucket_edit_text"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:hint="@string/screen_s3_settings_bucket_label"
+				android:imeOptions="flagNoPersonalizedLearning"
+				android:maxLines="1"
+				android:singleLine="true" />
+
+		</com.google.android.material.textfield.TextInputLayout>
+
+		<com.google.android.material.textfield.TextInputLayout
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content">
+
+			<com.google.android.material.textfield.TextInputEditText
+				android:id="@+id/endpoint_edit_text"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:hint="@string/screen_s3_settings_endpoint_label"
+				android:imeOptions="flagNoPersonalizedLearning"
+				android:maxLines="1"
+				android:singleLine="true" />
+
+		</com.google.android.material.textfield.TextInputLayout>
+
+		<com.google.android.material.textfield.TextInputLayout
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content">
+
+			<com.google.android.material.textfield.TextInputEditText
+				android:id="@+id/region_edit_text"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:hint="@string/screen_s3_settings_region_label"
+				android:imeOptions="flagNoPersonalizedLearning"
+				android:maxLines="1"
+				android:singleLine="true" />
+
+		</com.google.android.material.textfield.TextInputLayout>
+
+		<Button
+			android:id="@+id/create_cloud_button"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:layout_marginTop="16dp"
+			android:text="@string/screen_webdav_settings_done_button_text"
+			android:textStyle="bold" />
+
+	</LinearLayout>
+</ScrollView>
