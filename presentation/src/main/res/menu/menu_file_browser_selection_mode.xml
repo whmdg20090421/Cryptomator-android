@@ -33,6 +33,12 @@
 		app:showAsAction="never" />
 
 	<item
+		android:id="@+id/action_sync_items"
+		android:enabled="false"
+		android:title="@string/screen_file_browser_node_action_sync"
+		app:showAsAction="never" />
+
+	<item
 		android:id="@+id/action_delete_items"
 		android:enabled="false"
 		android:title="@string/screen_file_browser_node_action_delete"

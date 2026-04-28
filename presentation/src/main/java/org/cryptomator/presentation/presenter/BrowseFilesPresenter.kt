@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import android.widget.Toast
 import androidx.core.net.toFile
+import androidx.documentfile.provider.DocumentFile
 import org.cryptomator.data.cloud.crypto.CryptoFolder
 import org.cryptomator.domain.Cloud
 import org.cryptomator.domain.CloudFile
@@ -65,6 +66,7 @@ import org.cryptomator.presentation.model.mappers.CloudNodeModelMapper
 import org.cryptomator.presentation.model.mappers.ProgressModelMapper
 import org.cryptomator.presentation.model.mappers.ProgressStateModelMapper
 import org.cryptomator.presentation.service.OpenWritableFileNotification
+import org.cryptomator.presentation.ui.activity.SyncChooseTargetActivity
 import org.cryptomator.presentation.ui.activity.view.BrowseFilesView
 import org.cryptomator.presentation.ui.dialog.ExportCloudFilesDialog
 import org.cryptomator.presentation.ui.dialog.FileNameDialog
@@ -86,7 +88,9 @@ import org.cryptomator.util.file.MimeType
 import org.cryptomator.util.file.MimeTypes
 import java.io.FileInputStream
 import java.io.FileNotFoundException
+import java.io.FileOutputStream
 import java.io.Serializable
+import java.util.ArrayDeque
 import java.util.function.Supplier
 import javax.inject.Inject
 import kotlin.reflect.KClass
@@ -158,6 +162,9 @@ class BrowseFilesPresenter @Inject constructor( //
 
 	@JvmField
 	var openWritableFileNotification: OpenWritableFileNotification? = null
+
+	private var importState: ImportState? = null
+	private var syncState: SyncState? = null
 
 	override fun workflows(): Iterable<Workflow<*>> {
 		return listOf(addExistingVaultWorkflow, createNewVaultWorkflow)
@@ -1047,6 +1054,25 @@ class BrowseFilesPresenter @Inject constructor( //
 		requestActivityResult(ActivityResultCallbacks.selectedFiles(), intent)
 	}
 
+	fun onImportFolderClicked(folder: CloudFolderModel) {
+		try {
+			requestActivityResult(
+				ActivityResultCallbacks.pickedLocalFolderForImport(folder),
+				Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+			)
+		} catch (exception: ActivityNotFoundException) {
+			Toast.makeText(activity().applicationContext, context().getText(R.string.screen_cloud_local_error_no_content_provider), Toast.LENGTH_SHORT).show()
+			Timber.tag("BrowseFilesPresenter").e(exception, "Import folder: No ContentProvider on system")
+		}
+	}
+
+	fun onSyncFolderClicked(sourceFolder: CloudFolderModel, mode: SyncMode) {
+		requestActivityResult(
+			ActivityResultCallbacks.syncTargetChosen(sourceFolder, mode),
+			Intent(context(), SyncChooseTargetActivity::class.java)
+		)
+	}
+
 	fun onUploadCanceled() {
 		uploadFilesUseCase.cancel()
 	}
@@ -1055,6 +1081,29 @@ class BrowseFilesPresenter @Inject constructor( //
 	fun selectedFiles(result: ActivityResult) {
 		val fileUris = getFileUrisFromIntent(result.intent())
 		prepareSelectedFilesForUpload(fileUris)
+	}
+
+	@Callback
+	fun pickedLocalFolderForImport(result: ActivityResult, targetFolder: CloudFolderModel) {
+		val treeUri = Uri.parse(result.intent().data.toString())
+		persistUriPermission(treeUri)
+		val localRoot = DocumentFile.fromTreeUri(context(), treeUri)
+		if (localRoot == null) {
+			showError(IllegalStateException("No document tree selected"))
+			return
+		}
+		startImportFolder(localRoot, targetFolder)
+	}
+
+	@Callback
+	fun syncTargetChosen(result: ActivityResult, sourceFolder: CloudFolderModel, mode: SyncMode) {
+		val targetFolder = result.singleResult as CloudFolderModel
+		targetFolder.vault()?.let {
+			if (!it.isLocked) {
+				view?.showMessage(R.string.screen_file_browser_msg_sync_target_unlocked)
+			}
+		}
+		startSync(sourceFolder, targetFolder, mode)
 	}
 
 	private fun getFileUrisFromIntent(intent: Intent): List<Uri> {
@@ -1268,6 +1317,260 @@ class BrowseFilesPresenter @Inject constructor( //
 			return !(inSelectionMode || inAction)
 		}
 	}
+
+	private fun persistUriPermission(uri: Uri) {
+		context()
+			.contentResolver
+			.takePersistableUriPermission(
+				uri,
+				Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+			)
+	}
+
+	private fun startImportFolder(localRoot: DocumentFile, targetFolder: CloudFolderModel) {
+		view?.showProgress(ProgressModel.GENERIC)
+		importState = ImportState(
+			stack = ArrayDeque<ImportDirState>().apply {
+				addLast(ImportDirState(localRoot, targetFolder, 0, localRoot.listFiles()))
+			}
+		)
+		proceedImportFolder()
+	}
+
+	private fun proceedImportFolder() {
+		val state = importState ?: return
+		while (true) {
+			val current = state.stack.peekLast()
+			if (current == null) {
+				finishImportFolder()
+				return
+			}
+			if (current.index >= current.children.size) {
+				state.stack.removeLast()
+				continue
+			}
+			val child = current.children[current.index++]
+			if (child.isDirectory) {
+				val folderName = child.name
+				if (folderName.isNullOrBlank()) {
+					continue
+				}
+				createOrGetRemoteFolder(current.targetParent, folderName) { remoteFolder ->
+					if (remoteFolder == null) {
+						finishImportFolder()
+						return@createOrGetRemoteFolder
+					}
+					state.stack.addLast(ImportDirState(child, remoteFolder, 0, child.listFiles()))
+					proceedImportFolder()
+				}
+				return
+			}
+			if (child.isFile) {
+				val fileName = child.name
+				if (fileName.isNullOrBlank()) {
+					continue
+				}
+				val uploadFile = UploadFile.anUploadFile()
+					.withFileName(fileName)
+					.withDataSource(UriBasedDataSource.from(child.uri))
+					.thatIsReplacing(true)
+					.build()
+				uploadFilesUseCase
+					.withParent(current.targetParent.toCloudNode())
+					.andFiles(listOf(uploadFile))
+					.run(object : DefaultProgressAwareResultHandler<List<CloudFile>, UploadState>() {
+						override fun onFinished() {
+							proceedImportFolder()
+						}
+					})
+				return
+			}
+		}
+	}
+
+	private fun finishImportFolder() {
+		importState = null
+		view?.showProgress(ProgressModel.COMPLETED)
+		view?.showLoading(true)
+		view?.folder?.let { getCloudList(it) }
+		view?.showMessage(R.string.screen_file_browser_msg_import_finished)
+	}
+
+	private fun createOrGetRemoteFolder(parent: CloudFolderModel, folderName: String, onResult: (CloudFolderModel?) -> Unit) {
+		createFolderUseCase
+			.withParent(parent.toCloudNode())
+			.andFolderName(folderName)
+			.run(object : DefaultResultHandler<CloudFolder>() {
+				override fun onSuccess(cloudFolder: CloudFolder) {
+					onResult(cloudFolderModelMapper.toModel(cloudFolder))
+				}
+
+				override fun onError(e: Throwable) {
+					if (e is CloudNodeAlreadyExistsException) {
+						getCloudListUseCase
+							.withFolder(parent.toCloudNode())
+							.run(object : DefaultResultHandler<List<CloudNode>>() {
+								override fun onSuccess(nodes: List<CloudNode>) {
+									val existing = nodes
+										.filterIsInstance<CloudFolder>()
+										.firstOrNull { it.name == folderName }
+									onResult(existing?.let { cloudFolderModelMapper.toModel(it) })
+								}
+
+								override fun onError(e: Throwable) {
+									onResult(null)
+								}
+							})
+					} else {
+						onResult(null)
+					}
+				}
+			})
+	}
+
+	private data class ImportState(
+		val stack: ArrayDeque<ImportDirState>
+	)
+
+	private data class ImportDirState(
+		val localDir: DocumentFile,
+		val targetParent: CloudFolderModel,
+		var index: Int,
+		val children: Array<DocumentFile>
+	)
+
+	enum class SyncMode {
+		BIDIRECTIONAL,
+		LOCAL_TO_TARGET,
+		TARGET_TO_LOCAL
+	}
+
+	private fun startSync(sourceFolder: CloudFolderModel, targetFolder: CloudFolderModel, mode: SyncMode) {
+		val phases = ArrayDeque<SyncPhase>()
+		when (mode) {
+			SyncMode.BIDIRECTIONAL -> {
+				phases.addLast(SyncPhase(sourceFolder, targetFolder))
+				phases.addLast(SyncPhase(targetFolder, sourceFolder))
+			}
+			SyncMode.LOCAL_TO_TARGET -> phases.addLast(SyncPhase(sourceFolder, targetFolder))
+			SyncMode.TARGET_TO_LOCAL -> phases.addLast(SyncPhase(targetFolder, sourceFolder))
+		}
+		syncState = SyncState(phases, ArrayDeque(), null, null)
+		(activity().application as CryptomatorApp).suspendLock()
+		view?.showProgress(ProgressModel.GENERIC)
+		view?.showMessage(R.string.screen_file_browser_msg_sync_started)
+		proceedSyncPhase()
+	}
+
+	private fun proceedSyncPhase() {
+		val state = syncState ?: return
+		val phase = state.phases.peekFirst()
+		if (phase == null) {
+			finishSync()
+			return
+		}
+		getCloudListUseCase
+			.withFolder(phase.from.toCloudNode())
+			.run(object : DefaultResultHandler<List<CloudNode>>() {
+				override fun onSuccess(nodes: List<CloudNode>) {
+					val files = nodes
+						.filterIsInstance<CloudFile>()
+						.map { cloudFileModelMapper.toModel(it) }
+					state.queue.clear()
+					state.queue.addAll(files)
+					copyNextSyncFile()
+				}
+
+				override fun onError(e: Throwable) {
+					failSync(e)
+				}
+			})
+	}
+
+	private fun copyNextSyncFile() {
+		val state = syncState ?: return
+		val phase = state.phases.peekFirst() ?: run {
+			finishSync()
+			return
+		}
+		val file = state.queue.pollFirst()
+		if (file == null) {
+			state.phases.pollFirst()
+			proceedSyncPhase()
+			return
+		}
+		val tmpUri = fileCacheUtils.tmpFile().empty().create()
+		val sink = try {
+			FileOutputStream(tmpUri.toFile())
+		} catch (e: FileNotFoundException) {
+			fileCacheUtils.deleteTmpFile(tmpUri)
+			failSync(e)
+			return
+		}
+		state.currentTmpUri = tmpUri
+		state.currentSink = sink
+		val downloadFile = DownloadFile.Builder()
+			.setDownloadFile(file.toCloudNode())
+			.setDataSink(sink)
+			.build()
+		downloadFilesUseCase
+			.withDownloadFiles(listOf(downloadFile))
+			.run(object : DefaultProgressAwareResultHandler<List<CloudFile>, DownloadState>() {
+				override fun onSuccess(files: List<CloudFile>) {
+					val uploadFile = createUploadFile(file.name, tmpUri, true)
+					uploadFilesUseCase
+						.withParent(phase.to.toCloudNode())
+						.andFiles(listOf(uploadFile))
+						.run(object : DefaultProgressAwareResultHandler<List<CloudFile>, UploadState>() {
+							override fun onFinished() {
+								sink.close()
+								fileCacheUtils.deleteTmpFile(tmpUri)
+								state.currentTmpUri = null
+								state.currentSink = null
+								copyNextSyncFile()
+							}
+
+							override fun onError(e: Throwable) {
+								sink.close()
+								fileCacheUtils.deleteTmpFile(tmpUri)
+								failSync(e)
+							}
+						})
+				}
+
+				override fun onError(e: Throwable) {
+					sink.close()
+					fileCacheUtils.deleteTmpFile(tmpUri)
+					failSync(e)
+				}
+			})
+	}
+
+	private fun finishSync() {
+		(activity().application as CryptomatorApp).unSuspendLock()
+		syncState = null
+		view?.showProgress(ProgressModel.COMPLETED)
+		view?.showMessage(R.string.screen_file_browser_msg_sync_finished)
+	}
+
+	private fun failSync(e: Throwable) {
+		(activity().application as CryptomatorApp).unSuspendLock()
+		syncState = null
+		view?.showProgress(ProgressModel.COMPLETED)
+		showError(e)
+	}
+
+	private data class SyncPhase(
+		val from: CloudFolderModel,
+		val to: CloudFolderModel
+	)
+
+	private data class SyncState(
+		val phases: ArrayDeque<SyncPhase>,
+		val queue: ArrayDeque<CloudFileModel>,
+		var currentTmpUri: Uri?,
+		var currentSink: FileOutputStream?
+	)
 
 	companion object {
 

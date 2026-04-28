@@ -106,6 +106,9 @@
 			android:name=".ui.activity.AutoUploadChooseVaultActivity"
 			android:exported="false" />
 		<activity
+			android:name=".ui.activity.SyncChooseTargetActivity"
+			android:exported="false" />
+		<activity
 			android:name=".ui.activity.BiometricAuthSettingsActivity"
 			android:exported="false" />
 		<activity

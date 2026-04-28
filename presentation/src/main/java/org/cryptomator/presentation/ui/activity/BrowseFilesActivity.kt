@@ -6,6 +6,10 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.view.Menu
 import android.view.View
+import android.widget.EditText
+import android.widget.RadioGroup
+import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.SearchView
 import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.Fragment
@@ -215,6 +219,41 @@ class BrowseFilesActivity : BaseActivity<ActivityLayoutBinding>(ActivityLayoutBi
 			}
 			true
 		}
+		R.id.action_sync_items -> {
+			val selected = browseFilesFragment().selectedCloudNodes
+			val folderToSync = selected.firstOrNull() as? CloudFolderModel
+			if (folderToSync != null) {
+				val dialogView = layoutInflater.inflate(R.layout.dialog_sync_config, null, false)
+				val sourcePath = dialogView.findViewById<TextView>(R.id.sync_source_path)
+				val sourcePassword = dialogView.findViewById<EditText>(R.id.sync_source_password)
+				val targetPassword = dialogView.findViewById<EditText>(R.id.sync_target_password)
+				val modeGroup = dialogView.findViewById<RadioGroup>(R.id.sync_mode_group)
+
+				sourcePath.text = getString(R.string.screen_sync_source_path_label, currentFolderPath())
+				if (folderToSync.vault()?.isLocked == false) {
+					sourcePassword.setText(R.string.screen_sync_vault_unlocked)
+					sourcePassword.isEnabled = false
+				}
+				targetPassword.setText("")
+
+				AlertDialog.Builder(this)
+					.setTitle(R.string.screen_file_browser_node_action_sync)
+					.setView(dialogView)
+					.setPositiveButton(R.string.screen_sync_choose_target_confirm) { _, _ ->
+						val mode = when (modeGroup.checkedRadioButtonId) {
+							R.id.sync_mode_local_to_target -> BrowseFilesPresenter.SyncMode.LOCAL_TO_TARGET
+							R.id.sync_mode_target_to_local -> BrowseFilesPresenter.SyncMode.TARGET_TO_LOCAL
+							else -> BrowseFilesPresenter.SyncMode.BIDIRECTIONAL
+						}
+						guardWriteAccess(LicenseEnforcer.LockedAction.UPLOAD_FILES, folderToSync) {
+							browseFilesPresenter.onSyncFolderClicked(folderToSync, mode)
+						}
+					}
+					.setNegativeButton(R.string.dialog_button_cancel) { _, _ -> }
+					.show()
+			}
+			true
+		}
 		R.id.action_sort_az -> {
 			browseFilesFragment().setSort(CloudNodeModelNameAZComparator())
 			browseFilesPresenter.onRefreshTriggered(browseFilesFragment().folder)
@@ -264,6 +303,8 @@ class BrowseFilesActivity : BaseActivity<ActivityLayoutBinding>(ActivityLayoutBi
 			menu.findItem(R.id.action_move_items).isEnabled = enableGeneralSelectionActions
 			menu.findItem(R.id.action_export_items).isEnabled = enableGeneralSelectionActions
 			menu.findItem(R.id.action_share_items).isEnabled = enableGeneralSelectionActions
+			val selected = browseFilesFragment().selectedCloudNodes
+			menu.findItem(R.id.action_sync_items).isEnabled = selected.size == 1 && selected[0].isFolder
 		}
 
 		val searchView = menu.findItem(R.id.action_search).actionView as SearchView
@@ -479,6 +520,12 @@ class BrowseFilesActivity : BaseActivity<ActivityLayoutBinding>(ActivityLayoutBi
 	override fun onUploadFilesClicked(folder: CloudFolderModel) {
 		guardWriteAccess(LicenseEnforcer.LockedAction.UPLOAD_FILES, folder) {
 			browseFilesPresenter.onUploadFilesClicked(folder)
+		}
+	}
+
+	override fun onImportFolderClicked(folder: CloudFolderModel) {
+		guardWriteAccess(LicenseEnforcer.LockedAction.UPLOAD_FILES, folder) {
+			browseFilesPresenter.onImportFolderClicked(folder)
 		}
 	}
 
