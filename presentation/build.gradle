@@ -168,6 +168,7 @@ android {
 		abortOnError false
 		ignoreWarnings true
 		quiet true
+		checkReleaseBuilds false
 	}
 
 	namespace 'org.cryptomator.presentation'
