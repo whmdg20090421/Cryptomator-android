@@ -228,6 +228,10 @@ class BrowseFilesActivity : BaseActivity<ActivityLayoutBinding>(ActivityLayoutBi
 				val sourcePassword = dialogView.findViewById<EditText>(R.id.sync_source_password)
 				val targetPassword = dialogView.findViewById<EditText>(R.id.sync_target_password)
 				val modeGroup = dialogView.findViewById<RadioGroup>(R.id.sync_mode_group)
+				val conflictGroup = dialogView.findViewById<RadioGroup>(R.id.sync_conflict_group)
+				val conflictOption1 = dialogView.findViewById<TextView>(R.id.sync_conflict_option_1)
+				val conflictOption2 = dialogView.findViewById<TextView>(R.id.sync_conflict_option_2)
+				val conflictOption3 = dialogView.findViewById<TextView>(R.id.sync_conflict_option_3)
 
 				sourcePath.text = getString(R.string.screen_sync_source_path_label, currentFolderPath())
 				if (folderToSync.vault()?.isLocked == false) {
@@ -235,6 +239,32 @@ class BrowseFilesActivity : BaseActivity<ActivityLayoutBinding>(ActivityLayoutBi
 					sourcePassword.isEnabled = false
 				}
 				targetPassword.setText("")
+
+				fun updateConflictOptions(mode: BrowseFilesPresenter.SyncMode) {
+					when (mode) {
+						BrowseFilesPresenter.SyncMode.BIDIRECTIONAL -> {
+							conflictOption1.setText(R.string.screen_sync_conflict_local_wins)
+							conflictOption2.setText(R.string.screen_sync_conflict_cloud_wins)
+							conflictOption3.setText(R.string.screen_sync_conflict_time)
+						}
+						else -> {
+							conflictOption1.setText(R.string.screen_sync_conflict_skip)
+							conflictOption2.setText(R.string.screen_sync_conflict_overwrite)
+							conflictOption3.setText(R.string.screen_sync_conflict_time)
+						}
+					}
+					conflictGroup.check(R.id.sync_conflict_option_1)
+				}
+
+				updateConflictOptions(BrowseFilesPresenter.SyncMode.BIDIRECTIONAL)
+				modeGroup.setOnCheckedChangeListener { _, checkedId ->
+					val mode = when (checkedId) {
+						R.id.sync_mode_local_to_target -> BrowseFilesPresenter.SyncMode.LOCAL_TO_TARGET
+						R.id.sync_mode_target_to_local -> BrowseFilesPresenter.SyncMode.TARGET_TO_LOCAL
+						else -> BrowseFilesPresenter.SyncMode.BIDIRECTIONAL
+					}
+					updateConflictOptions(mode)
+				}
 
 				AlertDialog.Builder(this)
 					.setTitle(R.string.screen_file_browser_node_action_sync)
@@ -245,8 +275,20 @@ class BrowseFilesActivity : BaseActivity<ActivityLayoutBinding>(ActivityLayoutBi
 							R.id.sync_mode_target_to_local -> BrowseFilesPresenter.SyncMode.TARGET_TO_LOCAL
 							else -> BrowseFilesPresenter.SyncMode.BIDIRECTIONAL
 						}
+						val conflict = when (mode) {
+							BrowseFilesPresenter.SyncMode.BIDIRECTIONAL -> when (conflictGroup.checkedRadioButtonId) {
+								R.id.sync_conflict_option_2 -> BrowseFilesPresenter.SyncConflictStrategy.CLOUD_WINS
+								R.id.sync_conflict_option_3 -> BrowseFilesPresenter.SyncConflictStrategy.TIME
+								else -> BrowseFilesPresenter.SyncConflictStrategy.LOCAL_WINS
+							}
+							else -> when (conflictGroup.checkedRadioButtonId) {
+								R.id.sync_conflict_option_2 -> BrowseFilesPresenter.SyncConflictStrategy.OVERWRITE
+								R.id.sync_conflict_option_3 -> BrowseFilesPresenter.SyncConflictStrategy.TIME
+								else -> BrowseFilesPresenter.SyncConflictStrategy.SKIP
+							}
+						}
 						guardWriteAccess(LicenseEnforcer.LockedAction.UPLOAD_FILES, folderToSync) {
-							browseFilesPresenter.onSyncFolderClicked(folderToSync, mode)
+							browseFilesPresenter.onSyncFolderClicked(folderToSync, mode, conflict)
 						}
 					}
 					.setNegativeButton(R.string.dialog_button_cancel) { _, _ -> }

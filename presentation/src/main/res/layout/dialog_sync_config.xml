@@ -64,7 +64,33 @@
 
 		</RadioGroup>
 
+		<RadioGroup
+			android:id="@+id/sync_conflict_group"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:layout_marginTop="12dp">
+
+			<RadioButton
+				android:id="@+id/sync_conflict_option_1"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:checked="true"
+				android:text="@string/screen_sync_conflict_local_wins" />
+
+			<RadioButton
+				android:id="@+id/sync_conflict_option_2"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:text="@string/screen_sync_conflict_cloud_wins" />
+
+			<RadioButton
+				android:id="@+id/sync_conflict_option_3"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:text="@string/screen_sync_conflict_time" />
+
+		</RadioGroup>
+
 	</LinearLayout>
 
 </ScrollView>
-

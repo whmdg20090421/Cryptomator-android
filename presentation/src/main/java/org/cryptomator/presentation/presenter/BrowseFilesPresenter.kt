@@ -1066,9 +1066,9 @@ class BrowseFilesPresenter @Inject constructor( //
 		}
 	}
 
-	fun onSyncFolderClicked(sourceFolder: CloudFolderModel, mode: SyncMode) {
+	fun onSyncFolderClicked(sourceFolder: CloudFolderModel, mode: SyncMode, conflictStrategy: SyncConflictStrategy) {
 		requestActivityResult(
-			ActivityResultCallbacks.syncTargetChosen(sourceFolder, mode),
+			ActivityResultCallbacks.syncTargetChosen(sourceFolder, mode, conflictStrategy),
 			Intent(context(), SyncChooseTargetActivity::class.java)
 		)
 	}
@@ -1096,14 +1096,14 @@ class BrowseFilesPresenter @Inject constructor( //
 	}
 
 	@Callback
-	fun syncTargetChosen(result: ActivityResult, sourceFolder: CloudFolderModel, mode: SyncMode) {
+	fun syncTargetChosen(result: ActivityResult, sourceFolder: CloudFolderModel, mode: SyncMode, conflictStrategy: SyncConflictStrategy) {
 		val targetFolder = result.singleResult as CloudFolderModel
 		targetFolder.vault()?.let {
 			if (!it.isLocked) {
 				view?.showMessage(R.string.screen_file_browser_msg_sync_target_unlocked)
 			}
 		}
-		startSync(sourceFolder, targetFolder, mode)
+		startSync(sourceFolder, targetFolder, mode, conflictStrategy)
 	}
 
 	private fun getFileUrisFromIntent(intent: Intent): List<Uri> {
@@ -1445,7 +1445,15 @@ class BrowseFilesPresenter @Inject constructor( //
 		TARGET_TO_LOCAL
 	}
 
-	private fun startSync(sourceFolder: CloudFolderModel, targetFolder: CloudFolderModel, mode: SyncMode) {
+	enum class SyncConflictStrategy {
+		LOCAL_WINS,
+		CLOUD_WINS,
+		TIME,
+		SKIP,
+		OVERWRITE
+	}
+
+	private fun startSync(sourceFolder: CloudFolderModel, targetFolder: CloudFolderModel, mode: SyncMode, conflictStrategy: SyncConflictStrategy) {
 		val phases = ArrayDeque<SyncPhase>()
 		when (mode) {
 			SyncMode.BIDIRECTIONAL -> {
@@ -1455,7 +1463,18 @@ class BrowseFilesPresenter @Inject constructor( //
 			SyncMode.LOCAL_TO_TARGET -> phases.addLast(SyncPhase(sourceFolder, targetFolder))
 			SyncMode.TARGET_TO_LOCAL -> phases.addLast(SyncPhase(targetFolder, sourceFolder))
 		}
-		syncState = SyncState(phases, ArrayDeque(), null, null)
+		syncState = SyncState(
+			phases = phases,
+			queue = ArrayDeque(),
+			currentTmpUri = null,
+			currentSink = null,
+			localRoot = sourceFolder,
+			cloudRoot = targetFolder,
+			mode = mode,
+			conflictStrategy = conflictStrategy,
+			targetFolderCache = HashMap(),
+			targetFileMap = emptyMap()
+		)
 		(activity().application as CryptomatorApp).suspendLock()
 		view?.showProgress(ProgressModel.GENERIC)
 		view?.showMessage(R.string.screen_file_browser_msg_sync_started)
@@ -1469,16 +1488,28 @@ class BrowseFilesPresenter @Inject constructor( //
 			finishSync()
 			return
 		}
-		getCloudListUseCase
-			.withFolder(phase.from.toCloudNode())
-			.run(object : DefaultResultHandler<List<CloudNode>>() {
-				override fun onSuccess(nodes: List<CloudNode>) {
-					val files = nodes
-						.filterIsInstance<CloudFile>()
-						.map { cloudFileModelMapper.toModel(it) }
-					state.queue.clear()
-					state.queue.addAll(files)
-					copyNextSyncFile()
+		getCloudListRecursiveUseCase
+			.withFolders(cloudFolderModelMapper.fromModels(listOf(phase.from)))
+			.run(object : DefaultResultHandler<CloudNodeRecursiveListing>() {
+				override fun onSuccess(sourceListing: CloudNodeRecursiveListing) {
+					getCloudListRecursiveUseCase
+						.withFolders(cloudFolderModelMapper.fromModels(listOf(phase.to)))
+						.run(object : DefaultResultHandler<CloudNodeRecursiveListing>() {
+							override fun onSuccess(targetListing: CloudNodeRecursiveListing) {
+								state.targetFileMap = fileMapFromRecursiveListing(phase.to, targetListing)
+								state.targetFolderCache.clear()
+								state.targetFolderCache[""] = phase.to
+
+								val entries = fileEntriesFromRecursiveListing(phase.from, sourceListing)
+								state.queue.clear()
+								state.queue.addAll(entries)
+								copyNextSyncEntry()
+							}
+
+							override fun onError(e: Throwable) {
+								failSync(e)
+							}
+						})
 				}
 
 				override fun onError(e: Throwable) {
@@ -1487,63 +1518,88 @@ class BrowseFilesPresenter @Inject constructor( //
 			})
 	}
 
-	private fun copyNextSyncFile() {
+	private fun copyNextSyncEntry() {
 		val state = syncState ?: return
 		val phase = state.phases.peekFirst() ?: run {
 			finishSync()
 			return
 		}
-		val file = state.queue.pollFirst()
-		if (file == null) {
+		val entry = state.queue.pollFirst()
+		if (entry == null) {
 			state.phases.pollFirst()
 			proceedSyncPhase()
 			return
 		}
-		val tmpUri = fileCacheUtils.tmpFile().empty().create()
-		val sink = try {
-			FileOutputStream(tmpUri.toFile())
-		} catch (e: FileNotFoundException) {
-			fileCacheUtils.deleteTmpFile(tmpUri)
-			failSync(e)
+
+		val existingTarget = state.targetFileMap[entry.relativePath]
+		if (!shouldTransferSyncFile(state, phase, entry.file, existingTarget)) {
+			copyNextSyncEntry()
 			return
 		}
-		state.currentTmpUri = tmpUri
-		state.currentSink = sink
-		val downloadFile = DownloadFile.Builder()
-			.setDownloadFile(file.toCloudNode())
-			.setDataSink(sink)
-			.build()
-		downloadFilesUseCase
-			.withDownloadFiles(listOf(downloadFile))
-			.run(object : DefaultProgressAwareResultHandler<List<CloudFile>, DownloadState>() {
-				override fun onSuccess(files: List<CloudFile>) {
-					val uploadFile = createUploadFile(file.name, tmpUri, true)
-					uploadFilesUseCase
-						.withParent(phase.to.toCloudNode())
-						.andFiles(listOf(uploadFile))
-						.run(object : DefaultProgressAwareResultHandler<List<CloudFile>, UploadState>() {
-							override fun onFinished() {
-								sink.close()
-								fileCacheUtils.deleteTmpFile(tmpUri)
-								state.currentTmpUri = null
-								state.currentSink = null
-								copyNextSyncFile()
-							}
 
-							override fun onError(e: Throwable) {
-								sink.close()
-								fileCacheUtils.deleteTmpFile(tmpUri)
-								failSync(e)
-							}
-						})
-				}
+		val parentRelPath = entry.relativePath.substringBeforeLast('/', "")
+		ensureTargetFolder(phase.to, parentRelPath, state.targetFolderCache) { targetParent ->
+			if (targetParent == null) {
+				failSync(IllegalStateException("Unable to create target folder"))
+				return@ensureTargetFolder
+			}
+			val tmpUri = fileCacheUtils.tmpFile().empty().create()
+			val sink = try {
+				FileOutputStream(tmpUri.toFile())
+			} catch (e: FileNotFoundException) {
+				fileCacheUtils.deleteTmpFile(tmpUri)
+				failSync(e)
+				return@ensureTargetFolder
+			}
+			state.currentTmpUri = tmpUri
+			state.currentSink = sink
+			val downloadFile = DownloadFile.Builder()
+				.setDownloadFile(entry.file.toCloudNode())
+				.setDataSink(sink)
+				.build()
+			downloadFilesUseCase
+				.withDownloadFiles(listOf(downloadFile))
+				.run(object : DefaultProgressAwareResultHandler<List<CloudFile>, DownloadState>() {
+					override fun onProgress(progress: Progress<DownloadState>) {
+						view?.showProgress(entry.file, progressModelMapper.toModel(progress))
+					}
 
-				override fun onError(e: Throwable) {
-					sink.close()
-					fileCacheUtils.deleteTmpFile(tmpUri)
-					failSync(e)
-				}
-			})
+					override fun onSuccess(files: List<CloudFile>) {
+						val uploadFile = createUploadFile(entry.file.name, tmpUri, true)
+						uploadFilesUseCase
+							.withParent(targetParent.toCloudNode())
+							.andFiles(listOf(uploadFile))
+							.run(object : DefaultProgressAwareResultHandler<List<CloudFile>, UploadState>() {
+								override fun onProgress(progress: Progress<UploadState>) {
+									view?.showProgress(entry.file, progressModelMapper.toModel(progress))
+								}
+
+								override fun onFinished() {
+									view?.hideProgress(entry.file)
+									sink.close()
+									fileCacheUtils.deleteTmpFile(tmpUri)
+									state.currentTmpUri = null
+									state.currentSink = null
+									copyNextSyncEntry()
+								}
+
+								override fun onError(e: Throwable) {
+									view?.hideProgress(entry.file)
+									sink.close()
+									fileCacheUtils.deleteTmpFile(tmpUri)
+									failSync(e)
+								}
+							})
+					}
+
+					override fun onError(e: Throwable) {
+						view?.hideProgress(entry.file)
+						sink.close()
+						fileCacheUtils.deleteTmpFile(tmpUri)
+						failSync(e)
+					}
+				})
+		}
 	}
 
 	private fun finishSync() {
@@ -1560,6 +1616,129 @@ class BrowseFilesPresenter @Inject constructor( //
 		showError(e)
 	}
 
+	private fun fileEntriesFromRecursiveListing(root: CloudFolderModel, listing: CloudNodeRecursiveListing): List<SyncFileEntry> {
+		val entries = ArrayList<SyncFileEntry>()
+		val roots = listing.foldersContent
+		roots.forEach { folderListing ->
+			collectFilesFromFolderListing(root, folderListing, entries)
+		}
+		return entries
+	}
+
+	private fun collectFilesFromFolderListing(root: CloudFolderModel, folderListing: CloudFolderRecursiveListing, entries: MutableList<SyncFileEntry>) {
+		folderListing.files.forEach { file ->
+			val model = cloudFileModelMapper.toModel(file)
+			val relative = relativePath(root.path, model.path)
+			entries.add(SyncFileEntry(relative, model))
+		}
+		folderListing.folders.forEach { child ->
+			collectFilesFromFolderListing(root, child, entries)
+		}
+	}
+
+	private fun fileMapFromRecursiveListing(root: CloudFolderModel, listing: CloudNodeRecursiveListing): Map<String, CloudFileModel> {
+		val map = HashMap<String, CloudFileModel>()
+		val roots = listing.foldersContent
+		roots.forEach { folderListing ->
+			collectFileMapFromFolderListing(root, folderListing, map)
+		}
+		return map
+	}
+
+	private fun collectFileMapFromFolderListing(root: CloudFolderModel, folderListing: CloudFolderRecursiveListing, map: MutableMap<String, CloudFileModel>) {
+		folderListing.files.forEach { file ->
+			val model = cloudFileModelMapper.toModel(file)
+			val relative = relativePath(root.path, model.path)
+			map[relative] = model
+		}
+		folderListing.folders.forEach { child ->
+			collectFileMapFromFolderListing(root, child, map)
+		}
+	}
+
+	private fun relativePath(rootPath: String, fullPath: String): String {
+		val normalizedRoot = if (rootPath.endsWith("/")) rootPath.dropLast(1) else rootPath
+		val withoutRoot = if (fullPath.startsWith(normalizedRoot)) fullPath.substring(normalizedRoot.length) else fullPath
+		return withoutRoot.trimStart('/')
+	}
+
+	private fun ensureTargetFolder(
+		targetRoot: CloudFolderModel,
+		relativeDirPath: String,
+		cache: MutableMap<String, CloudFolderModel>,
+		onResult: (CloudFolderModel?) -> Unit
+	) {
+		if (relativeDirPath.isBlank()) {
+			onResult(targetRoot)
+			return
+		}
+		val segments = relativeDirPath.split("/").filter { it.isNotEmpty() }
+		ensureTargetFolderSegment(targetRoot, segments, 0, "", cache, onResult)
+	}
+
+	private fun ensureTargetFolderSegment(
+		current: CloudFolderModel,
+		segments: List<String>,
+		index: Int,
+		prefix: String,
+		cache: MutableMap<String, CloudFolderModel>,
+		onResult: (CloudFolderModel?) -> Unit
+	) {
+		if (index >= segments.size) {
+			onResult(current)
+			return
+		}
+		val seg = segments[index]
+		val nextPrefix = if (prefix.isEmpty()) seg else "$prefix/$seg"
+		val cached = cache[nextPrefix]
+		if (cached != null) {
+			ensureTargetFolderSegment(cached, segments, index + 1, nextPrefix, cache, onResult)
+			return
+		}
+		createOrGetRemoteFolder(current, seg) { created ->
+			if (created == null) {
+				onResult(null)
+				return@createOrGetRemoteFolder
+			}
+			cache[nextPrefix] = created
+			ensureTargetFolderSegment(created, segments, index + 1, nextPrefix, cache, onResult)
+		}
+	}
+
+	private fun shouldTransferSyncFile(
+		state: SyncState,
+		phase: SyncPhase,
+		source: CloudFileModel,
+		target: CloudFileModel?
+	): Boolean {
+		if (target == null) {
+			return true
+		}
+		return when (state.mode) {
+			SyncMode.BIDIRECTIONAL -> when (state.conflictStrategy) {
+				SyncConflictStrategy.LOCAL_WINS -> phase.from == state.localRoot
+				SyncConflictStrategy.CLOUD_WINS -> phase.from == state.cloudRoot
+				SyncConflictStrategy.TIME -> isSourceNewer(source, target)
+				else -> true
+			}
+			else -> when (state.conflictStrategy) {
+				SyncConflictStrategy.SKIP -> false
+				SyncConflictStrategy.OVERWRITE -> true
+				SyncConflictStrategy.TIME -> isSourceNewer(source, target)
+				else -> true
+			}
+		}
+	}
+
+	private fun isSourceNewer(source: CloudFileModel, target: CloudFileModel): Boolean {
+		val s = source.modified
+		val t = target.modified
+		if (s == null || t == null) {
+			return true
+		}
+		return s.after(t)
+	}
+
 	private data class SyncPhase(
 		val from: CloudFolderModel,
 		val to: CloudFolderModel
@@ -1567,9 +1746,20 @@ class BrowseFilesPresenter @Inject constructor( //
 
 	private data class SyncState(
 		val phases: ArrayDeque<SyncPhase>,
-		val queue: ArrayDeque<CloudFileModel>,
+		val queue: ArrayDeque<SyncFileEntry>,
 		var currentTmpUri: Uri?,
-		var currentSink: FileOutputStream?
+		var currentSink: FileOutputStream?,
+		val localRoot: CloudFolderModel,
+		val cloudRoot: CloudFolderModel,
+		val mode: SyncMode,
+		val conflictStrategy: SyncConflictStrategy,
+		val targetFolderCache: MutableMap<String, CloudFolderModel>,
+		var targetFileMap: Map<String, CloudFileModel>
+	)
+
+	private data class SyncFileEntry(
+		val relativePath: String,
+		val file: CloudFileModel
 	)
 
 	companion object {
