@@ -1,0 +1,5 @@
+- [x] `.github/workflows/build.yml` 被正确创建并包含编译和验证步骤。
+- [x] `presentation/build.gradle` 包含了 release 签名配置（读取系统环境变量）。
+- [x] `DoLicenseCheck.java` 成功绕过验证逻辑，不再抛出异常。
+- [x] `LicenseEnforcer.kt` 的相关权限判断均返回 true，不再跳转至授权页面。
+- [x] apktool 验证步骤成功追加到 GitHub Actions 工作流中。

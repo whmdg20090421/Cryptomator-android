@@ -37,13 +37,10 @@ class LicenseEnforcer @Inject constructor(private val sharedPreferencesHandler: 
 	}
 
 	fun hasWriteAccess(): Boolean {
-		return hasPaidLicense() || hasActiveTrial()
+		return true
 	}
 
-	fun hasPaidLicense() =
-		FlavorConfig.isPremiumFlavor ||
-			sharedPreferencesHandler.licenseToken().isNotEmpty() ||
-			sharedPreferencesHandler.hasRunningSubscription()
+	fun hasPaidLicense() = true
 
 	fun startTrial() {
 		if (sharedPreferencesHandler.trialExpirationDate() > 0) {
@@ -53,7 +50,7 @@ class LicenseEnforcer @Inject constructor(private val sharedPreferencesHandler: 
 		sharedPreferencesHandler.setTrialExpirationDate(trialExpiration)
 	}
 
-	fun hasActiveTrial(): Boolean = evaluateTrialState().isActive
+	fun hasActiveTrial(): Boolean = true
 
 	fun evaluateTrialState(): TrialState {
 		val state = readTrialState()
@@ -98,34 +95,15 @@ class LicenseEnforcer @Inject constructor(private val sharedPreferencesHandler: 
 	}
 
 	fun ensureWriteAccess(activity: Activity, action: LockedAction): Boolean {
-		if (hasWriteAccess()) {
-			return true
-		}
-
-		val intent = Intents.licenseCheckIntent()
-			.withLockedAction(action.name)
-			.build(activity as ContextHolder)
-		intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-		activity.startActivity(intent)
-		return false
+		return true
 	}
 
 	fun hasWriteAccessForVault(vault: VaultModel?): Boolean {
-		if (vault?.isHubVault == true) {
-			return vault.hasHubPaidLicense || hasWriteAccess()
-		}
-		return hasWriteAccess()
+		return true
 	}
 
 	fun ensureWriteAccessForVault(activity: Activity, vault: VaultModel?, action: LockedAction): Boolean {
-		if (vault?.isHubVault == true) {
-			if (hasWriteAccessForVault(vault)) {
-				return true
-			}
-			Toast.makeText(activity, R.string.read_only_reason_hub_inactive, Toast.LENGTH_LONG).show()
-			return false
-		}
-		return ensureWriteAccess(activity, action)
+		return true
 	}
 
 }

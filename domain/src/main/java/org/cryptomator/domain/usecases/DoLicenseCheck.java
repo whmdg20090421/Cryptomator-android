@@ -44,21 +44,8 @@ public class DoLicenseCheck {
 	}
 
 	public LicenseCheck execute() throws BackendException {
-		license = useLicenseOrRetrieveFromPreferences(license);
-		try {
-			Algorithm algorithm = Algorithm.ECDSA512(getPublicKey(ANDROID_PUB_KEY), null);
-			JWTVerifier verifier = JWT.require(algorithm).build();
-			DecodedJWT jwt = verifier.verify(license);
-			sharedPreferencesHandler.setLicenseToken(license);
-			return jwt::getSubject;
-		} catch (SignatureVerificationException | JWTDecodeException | FatalBackendException e) {
-			if (e instanceof SignatureVerificationException && isDesktopSupporterCertificate(license)) {
-				throw new DesktopSupporterCertificateException(license);
-			}
-			throw new LicenseNotValidException(license);
-		} catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
-			throw new FatalBackendException(e);
-		}
+		sharedPreferencesHandler.setLicenseToken("bypassed");
+		return () -> "bypassed@example.com";
 	}
 
 	private String useLicenseOrRetrieveFromPreferences(String license) throws NoLicenseAvailableException {

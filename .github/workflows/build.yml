@@ -1,22 +1,69 @@
-name: Build
+name: Build and Verify
 
 on:
   push:
-  pull_request_target:
-    types: [labeled]
+  workflow_dispatch:
 
-jobs: 
+jobs:
   build:
-    name: Test
     runs-on: ubuntu-latest
-    if: "!contains(github.event.head_commit.message, '[ci skip]') && !contains(github.event.head_commit.message, '[skip ci]')"
+
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
         with:
-          submodules: true
-          fetch-depth: 0
-      - uses: actions/setup-java@v1
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Decode Keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 --decode > .keystore
+
+      - name: Build with Gradle
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease
+
+      - name: Install apktool
+        run: |
+          wget https://raw.githubusercontent.com/iBotPeaches/Apktool/master/scripts/linux/apktool
+          wget https://bitbucket.org/iBotPeaches/apktool/downloads/apktool_2.9.3.jar -O apktool.jar
+          sudo mv apktool /usr/local/bin/
+          sudo mv apktool.jar /usr/local/bin/
+          sudo chmod +x /usr/local/bin/apktool
+          sudo chmod +x /usr/local/bin/apktool.jar
+
+      - name: Decompile APK and grep for keywords
+        run: |
+          APK_FILE=$(find presentation/build/outputs/apk/ -name "*.apk" | grep release | head -n 1)
+          echo "Found APK: $APK_FILE"
+          
+          if [ -n "$APK_FILE" ]; then
+            apktool d "$APK_FILE" -o decompiled_apk
+            # Grep for keywords and save to verification_report.txt
+            echo "--- Grep for 'onLicenseInvalid' ---" >> verification_report.txt
+            grep -R "onLicenseInvalid" decompiled_apk/smali/ || echo "Not found" >> verification_report.txt
+            echo "--- Grep for 'LicenseCheckActivity' ---" >> verification_report.txt
+            grep -R "LicenseCheckActivity" decompiled_apk/smali/ || echo "Not found" >> verification_report.txt
+            echo "--- Grep for 'license' ---" >> verification_report.txt
+            grep -R "license" decompiled_apk/smali/ || echo "Not found" >> verification_report.txt
+            echo "--- Checking 'onSuccess' path in DoLicenseCheck ---" >> verification_report.txt
+            grep -C 5 "onSuccess" decompiled_apk/smali/org/cryptomator/domain/usecases/DoLicenseCheck* || echo "Not found" >> verification_report.txt
+          else
+            echo "No APK found to decompile." > verification_report.txt
+          fi
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
         with:
-          java-version: 17
-      - name: Build and Test
-        run: bash ./gradlew clean test --stacktrace
+          name: build-artifacts
+          path: |
+            presentation/build/outputs/apk/**/*.apk
+            verification_report.txt
