@@ -38,7 +38,7 @@ allprojects {
 	ext {
 		androidApplicationId = 'org.cryptomator'
 		androidVersionCode = getVersionCode() // must be getVersionCode(). only at release tag set the actual value
-			androidVersionName = '1.0.1'
+		androidVersionName = '1.0.0'
 	}
 	repositories {
 		mavenCentral()

@@ -55,16 +55,3 @@ local.properties
 # Fluid Attacks
 **/fastlane/fluidattacks/results.csv
 **/fastlane/fluidattacks/apks/**
-
-*.log
-out_apk/
-.keystore
-**/*.keystore
-**/*.jks
-**/*.p12
-**/*.pem
-token.txt
-token*.txt
-!token.txt.example
-.env.local
-.secrets/

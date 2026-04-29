@@ -4,9 +4,6 @@ on:
   push:
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -70,32 +67,3 @@ jobs:
           path: |
             presentation/build/outputs/apk/**/*.apk
             verification_report.txt
-
-      - name: Create Release and Upload APK
-        if: github.ref == 'refs/heads/trae/solo-agent-oTMKwV'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          
-          LATEST_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null || true)
-          if [ -z "${LATEST_TAG}" ]; then
-            LATEST_TAG="1.0.0"
-          fi
-          
-          IFS='.' read -r MAJOR MINOR PATCH <<< "${LATEST_TAG}"
-          if [ -z "${MAJOR}" ] || [ -z "${MINOR}" ] || [ -z "${PATCH}" ]; then
-            MAJOR=1
-            MINOR=0
-            PATCH=0
-          fi
-          NEXT_TAG="${MAJOR}.${MINOR}.$((PATCH + 1))"
-          
-          APK_FILE=$(find presentation/build/outputs/apk/ -name "*.apk" | grep release | head -n 1)
-          if [ -z "${APK_FILE}" ]; then
-            echo "No APK produced." >&2
-            exit 1
-          fi
-          
-          gh release view "${NEXT_TAG}" >/dev/null 2>&1 || gh release create "${NEXT_TAG}" --title "${NEXT_TAG}" --notes "Automated build from ${GITHUB_SHA}"
-          gh release upload "${NEXT_TAG}" "${APK_FILE}" --clobber
