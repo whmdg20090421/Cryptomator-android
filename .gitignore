@@ -41,6 +41,9 @@ build/
 # Local configuration file (sdk path, etc)
 local.properties
 
+# Local secrets
+key.txt
+
 # fastlane
 **/fastlane/.env
 **/fastlane/report.xml
