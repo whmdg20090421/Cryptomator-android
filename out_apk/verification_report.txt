@@ -1,8 +1,0 @@
---- Grep for 'onLicenseInvalid' ---
-Not found
---- Grep for 'LicenseCheckActivity' ---
-Not found
---- Grep for 'license' ---
-Not found
---- Checking 'onSuccess' path in DoLicenseCheck ---
-Not found
