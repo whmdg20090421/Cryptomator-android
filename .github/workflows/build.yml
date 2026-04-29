@@ -29,7 +29,7 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew assembleRelease -Dorg.gradle.jvmargs="-Xmx4g"
+        run: ./gradlew :presentation:assembleApkstoreRelease -Dorg.gradle.jvmargs="-Xmx4g"
 
       - name: Install apktool
         run: |
@@ -42,7 +42,7 @@ jobs:
 
       - name: Decompile APK and grep for keywords
         run: |
-          APK_FILE=$(find presentation/build/outputs/apk/ -name "*.apk" | grep release | head -n 1)
+          APK_FILE=$(find presentation/build/outputs/apk/apkstore/release/ -name "*.apk" | head -n 1)
           echo "Found APK: $APK_FILE"
           
           if [ -n "$APK_FILE" ]; then
@@ -65,5 +65,5 @@ jobs:
         with:
           name: build-artifacts
           path: |
-            presentation/build/outputs/apk/**/*.apk
+            presentation/build/outputs/apk/apkstore/release/*.apk
             verification_report.txt
