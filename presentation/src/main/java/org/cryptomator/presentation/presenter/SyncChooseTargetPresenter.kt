@@ -60,7 +60,7 @@ class SyncChooseTargetPresenter @Inject constructor(
 	fun onConfirmPressed() {
 		val chosen = location
 		if (chosen == null) {
-			showMessage(R.string.screen_sync_choose_target_missing_target)
+			view?.showMessage(R.string.screen_sync_choose_target_missing_target)
 			return
 		}
 		finishWithResult(chosen)
@@ -166,4 +166,3 @@ class SyncChooseTargetPresenter @Inject constructor(
 		unsubscribeOnDestroy(getVaultListUseCase, getRootFolderUseCase, getDecryptedCloudForVaultUseCase)
 	}
 }
-

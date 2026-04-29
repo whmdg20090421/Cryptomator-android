@@ -1534,7 +1534,7 @@ class BrowseFilesPresenter @Inject constructor( //
 			state.currentTmpUri = tmpUri
 			state.currentSink = sink
 			val downloadFile = DownloadFile.Builder()
-				.setDownloadFile(entry.file.toCloudNode())
+				.setDownloadFile(op.sourceFile.toCloudNode())
 				.setDataSink(sink)
 				.build()
 			downloadFilesUseCase
